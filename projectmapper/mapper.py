@@ -24,12 +24,12 @@ class ProjectMapper:
             return
             
         # Add a route to the FastAPI app to view the project map
-        @self.app.get("/api/_project_map", include_in_schema=False)
+        @self.app.get("/_project_map", include_in_schema=False)
         async def view_project_map():
             return self.generate_map()
         
         # Add a route to view the project visualization
-        @self.app.get("/api/_project_visualization", include_in_schema=False)
+        @self.app.get("/_project_visualization", include_in_schema=False)
         async def view_project_visualization():
             from fastapi.responses import HTMLResponse
             return HTMLResponse(content=self.generate_visualization(), status_code=200)
