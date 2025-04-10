@@ -1,0 +1,12 @@
+name: projectmapper
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - pip
+  - pip:
+    - fastapi>=0.68.0
+    - pydantic>=2.11.3
+    - graphviz>=0.20.3
+    - -e .

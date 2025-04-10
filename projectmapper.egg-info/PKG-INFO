@@ -1,0 +1,14 @@
+Metadata-Version: 2.1
+Name: projectmapper
+Version: 0.1.0
+Summary: A library for mapping FastAPI project structure and connections
+Author: Penify
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Requires-Python: >=3.7
+Requires-Dist: fastapi>=0.68.0
+Requires-Dist: pydantic>=2.11.3
+Requires-Dist: graphviz>=0.20.3

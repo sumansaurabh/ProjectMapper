@@ -1,0 +1,13 @@
+README.md
+setup.py
+projectmapper/__init__.py
+projectmapper/dependencies.py
+projectmapper/mapper.py
+projectmapper/models.py
+projectmapper/scanner.py
+projectmapper/visualization.py
+projectmapper.egg-info/PKG-INFO
+projectmapper.egg-info/SOURCES.txt
+projectmapper.egg-info/dependency_links.txt
+projectmapper.egg-info/requires.txt
+projectmapper.egg-info/top_level.txt
