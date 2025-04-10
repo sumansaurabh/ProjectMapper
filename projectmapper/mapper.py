@@ -11,8 +11,16 @@ from .dependencies import DependencyAnalyzer
 
 
 class ProjectMapper:
-    def __init__(self, app: FastAPI):
+    def __init__(self, app: FastAPI, base_path: str = "/_project"):
+        """
+        Initialize the ProjectMapper.
+        
+        Args:
+            app (FastAPI): The FastAPI application to map
+            base_path (str): The base path from which to serve project map endpoints
+        """
         self.app = app
+        self.base_path = base_path
         self.route_scanner = RouteScanner(app)
         self.model_analyzer = ModelAnalyzer()
         self.dependency_analyzer = DependencyAnalyzer()
@@ -24,12 +32,12 @@ class ProjectMapper:
             return
             
         # Add a route to the FastAPI app to view the project map
-        @self.app.get("/_project_map", include_in_schema=False)
+        @self.app.get(f"{self.base_path}/json", include_in_schema=False)
         async def view_project_map():
             return self.generate_map()
         
         # Add a route to view the project visualization
-        @self.app.get("/_project_visualization", include_in_schema=False)
+        @self.app.get(f"{self.base_path}/html", include_in_schema=False)
         async def view_project_visualization():
             from fastapi.responses import HTMLResponse
             return HTMLResponse(content=self.generate_visualization(), status_code=200)
@@ -54,14 +62,21 @@ class ProjectMapper:
         return generate_html_visualization(project_map)
 
 
-def map_project(app: FastAPI) -> ProjectMapper:
+def map_project(app: FastAPI, base_path: str = "/_project") -> ProjectMapper:
     """
     Attach ProjectMapper to a FastAPI application.
+    
+    Args:
+        app (FastAPI): The FastAPI application to map
+        base_path (str): The base path from which to serve project map endpoints
     
     Usage:
         app = FastAPI()
         mapper = map_project(app)
+        
+        # Or with custom path:
+        mapper = map_project(app, base_path="/api/internal/project")
     """
-    mapper = ProjectMapper(app)
+    mapper = ProjectMapper(app, base_path=base_path)
     mapper.initialize()
     return mapper

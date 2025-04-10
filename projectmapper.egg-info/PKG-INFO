@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: projectmapper
-Version: 0.1.0
+Version: 0.1.2
 Summary: A library for mapping FastAPI project structure and connections
 Author: Penify
 Classifier: Programming Language :: Python :: 3

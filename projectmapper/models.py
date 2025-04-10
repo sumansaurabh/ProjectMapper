@@ -40,8 +40,11 @@ class ModelAnalyzer:
         """Analyze models found in the project."""
         models = []
         
+        # Create a copy of sys.modules to prevent "dictionary changed size during iteration" error
+        modules_items = list(sys.modules.items())
+        
         # Find all Pydantic models in loaded modules
-        for module_name, module in sys.modules.items():
+        for module_name, module in modules_items:
             if not module_name.startswith('_') and module:
                 try:
                     for name, obj in inspect.getmembers(module):

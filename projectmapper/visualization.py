@@ -1,5 +1,13 @@
 import json
-from typing import Dict, Any
+from typing import Dict, Any, List
+
+
+class SetEncoder(json.JSONEncoder):
+    """Custom JSON encoder that converts sets to lists."""
+    def default(self, obj):
+        if isinstance(obj, set):
+            return list(obj)
+        return json.JSONEncoder.default(self, obj)
 
 
 def generate_html_visualization(project_map: Dict[str, Any]) -> str:
@@ -9,7 +17,7 @@ def generate_html_visualization(project_map: Dict[str, Any]) -> str:
     dependencies_html = _generate_dependencies_html(project_map["dependencies"])
     
     # Generate project map JSON for JavaScript visualization
-    project_map_json = json.dumps(project_map)
+    project_map_json = json.dumps(project_map, cls=SetEncoder)
     
     return f"""
     <!DOCTYPE html>
@@ -18,6 +26,7 @@ def generate_html_visualization(project_map: Dict[str, Any]) -> str:
         <title>FastAPI Project Map</title>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <script src="https://d3js.org/d3.v7.min.js"></script>
         <style>
             body {{ font-family: Arial, sans-serif; margin: 0; padding: 20px; }}
             .container {{ max-width: 1200px; margin: 0 auto; }}
@@ -37,7 +46,78 @@ def generate_html_visualization(project_map: Dict[str, Any]) -> str:
             .method.put {{ background-color: #fca130; color: white; }}
             .method.delete {{ background-color: #f93e3e; color: white; }}
             .method.patch {{ background-color: #50e3c2; color: white; }}
-            #visualization {{ height: 600px; border: 1px solid #ddd; border-radius: 4px; }}
+            #visualization {{ height: 700px; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; position: relative; }}
+            #graph-container {{ width: 100%; height: 100%; }}
+            
+            /* D3 Visualization Styles */
+            .node {{ cursor: pointer; }}
+            .node text {{ font-size: 12px; }}
+            .node circle {{ stroke-width: 2px; }}
+            .node-route circle {{ fill: #61affe; }}
+            .node-model circle {{ fill: #fca130; }}
+            .node-dependency circle {{ fill: #49cc90; }}
+            .link {{ stroke: #999; stroke-opacity: 0.6; stroke-width: 1.5px; }}
+            
+            .tooltip {{ 
+                position: absolute; 
+                padding: 10px; 
+                background: white; 
+                border-radius: 4px; 
+                border: 1px solid #ddd;
+                pointer-events: none;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                max-width: 300px;
+                z-index: 1000;
+            }}
+            
+            .legend {{ 
+                position: absolute; 
+                top: 10px; 
+                right: 10px; 
+                background: white; 
+                padding: 10px; 
+                border: 1px solid #ddd; 
+                border-radius: 4px; 
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }}
+            
+            .legend-item {{ 
+                display: flex; 
+                align-items: center; 
+                margin-bottom: 5px; 
+            }}
+            
+            .legend-color {{ 
+                width: 15px; 
+                height: 15px; 
+                margin-right: 8px; 
+                border-radius: 50%; 
+                display: inline-block; 
+            }}
+            
+            .controls {{
+                position: absolute;
+                bottom: 10px;
+                left: 10px;
+                background: white;
+                padding: 5px 10px;
+                border-radius: 4px;
+                border: 1px solid #ddd;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }}
+            
+            button {{
+                border: none;
+                background: #f1f1f1;
+                padding: 5px 10px;
+                border-radius: 4px;
+                margin: 0 5px;
+                cursor: pointer;
+            }}
+            
+            button:hover {{
+                background: #ddd;
+            }}
         </style>
     </head>
     <body>
@@ -46,13 +126,40 @@ def generate_html_visualization(project_map: Dict[str, Any]) -> str:
             
             <div class="tab-container">
                 <div class="tabs">
-                    <div class="tab active" onclick="openTab(event, 'routes-tab')">Routes</div>
+                    <div class="tab active" onclick="openTab(event, 'visualization-tab')">Visualization</div>
+                    <div class="tab" onclick="openTab(event, 'routes-tab')">Routes</div>
                     <div class="tab" onclick="openTab(event, 'models-tab')">Models</div>
                     <div class="tab" onclick="openTab(event, 'dependencies-tab')">Dependencies</div>
-                    <div class="tab" onclick="openTab(event, 'visualization-tab')">Visualization</div>
                 </div>
                 
-                <div id="routes-tab" class="tab-content active">
+                <div id="visualization-tab" class="tab-content active">
+                    <h2>Interactive Visualization</h2>
+                    <div id="visualization">
+                        <div id="graph-container"></div>
+                        <div class="legend">
+                            <h3>Legend</h3>
+                            <div class="legend-item">
+                                <span class="legend-color" style="background-color: #61affe;"></span>
+                                <span>Routes</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-color" style="background-color: #fca130;"></span>
+                                <span>Models</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-color" style="background-color: #49cc90;"></span>
+                                <span>Dependencies</span>
+                            </div>
+                        </div>
+                        <div class="controls">
+                            <button id="zoom-in">+ Zoom In</button>
+                            <button id="zoom-out">- Zoom Out</button>
+                            <button id="reset">Reset</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="routes-tab" class="tab-content">
                     <h2>Routes</h2>
                     {routes_html}
                 </div>
@@ -65,11 +172,6 @@ def generate_html_visualization(project_map: Dict[str, Any]) -> str:
                 <div id="dependencies-tab" class="tab-content">
                     <h2>Dependencies</h2>
                     {dependencies_html}
-                </div>
-                
-                <div id="visualization-tab" class="tab-content">
-                    <h2>Interactive Visualization</h2>
-                    <div id="visualization"></div>
                 </div>
             </div>
         </div>
@@ -97,12 +199,337 @@ def generate_html_visualization(project_map: Dict[str, Any]) -> str:
                 }}
             }}
             
-            function renderVisualization() {{
-                // This is where we would integrate a visualization library like D3.js
-                // For now, we'll just show a placeholder
-                const container = document.getElementById('visualization');
-                container.innerHTML = '<div style="padding: 20px; text-align: center;">Interactive visualization would be rendered here using D3.js or a similar library.</div>';
+            // Transform the project map into a format suitable for D3
+            function transformProjectData(projectMap) {{
+                const nodes = [];
+                const links = [];
+                const nodeMap = new Map();
+                let nodeId = 0;
+                
+                // Add routes as nodes
+                projectMap.routes.forEach(route => {{
+                    const id = nodeId++;
+                    const methodString = Array.isArray(route.methods) ? 
+                        route.methods.join(', ') : route.methods;
+                        
+                    const node = {{
+                        id: id,
+                        name: `${{methodString}} ${{route.path}}`,
+                        type: 'route',
+                        details: route,
+                        endpoint: route.endpoint
+                    }};
+                    
+                    nodes.push(node);
+                    nodeMap.set(route.endpoint, id);
+                }});
+                
+                // Add models as nodes
+                projectMap.models.forEach(model => {{
+                    const id = nodeId++;
+                    const node = {{
+                        id: id,
+                        name: model.name,
+                        type: 'model',
+                        details: model
+                    }};
+                    
+                    nodes.push(node);
+                    nodeMap.set(model.name, id);
+                }});
+                
+                // Add dependencies as nodes if they aren't routes
+                const allDeps = new Set();
+                Object.values(projectMap.dependencies).forEach(deps => {{
+                    deps.forEach(dep => allDeps.add(dep));
+                }});
+                
+                allDeps.forEach(dep => {{
+                    if (!nodeMap.has(dep)) {{
+                        const id = nodeId++;
+                        const node = {{
+                            id: id,
+                            name: dep,
+                            type: 'dependency',
+                            details: {{ name: dep }}
+                        }};
+                        
+                        nodes.push(node);
+                        nodeMap.set(dep, id);
+                    }}
+                }});
+                
+                // Create links from routes to models
+                projectMap.routes.forEach(route => {{
+                    // Link to response model if any
+                    if (route.response_model) {{
+                        const modelName = route.response_model.split('[')[0].split('.')[-1];
+                        if (nodeMap.has(modelName)) {{
+                            links.push({{
+                                source: nodeMap.get(route.endpoint),
+                                target: nodeMap.get(modelName),
+                                type: 'returns'
+                            }});
+                        }}
+                    }}
+                    
+                    // Link to parameter models
+                    route.parameters.forEach(param => {{
+                        const paramType = param.annotation.split('[')[0].split('.')[-1];
+                        if (nodeMap.has(paramType)) {{
+                            links.push({{
+                                source: nodeMap.get(paramType),
+                                target: nodeMap.get(route.endpoint),
+                                type: 'parameter'
+                            }});
+                        }}
+                    }});
+                    
+                    // Link to dependencies
+                    route.dependencies.forEach(dep => {{
+                        const depName = dep.name;
+                        if (nodeMap.has(depName)) {{
+                            links.push({{
+                                source: nodeMap.get(route.endpoint),
+                                target: nodeMap.get(depName),
+                                type: 'depends_on'
+                            }});
+                        }}
+                    }});
+                }});
+                
+                // Create links from route endpoint to dependencies
+                Object.entries(projectMap.dependencies).forEach(([endpoint, deps]) => {{
+                    if (nodeMap.has(endpoint)) {{
+                        deps.forEach(dep => {{
+                            if (nodeMap.has(dep)) {{
+                                links.push({{
+                                    source: nodeMap.get(endpoint),
+                                    target: nodeMap.get(dep),
+                                    type: 'depends_on'
+                                }});
+                            }}
+                        }});
+                    }}
+                }});
+                
+                return {{ nodes, links }};
             }}
+            
+            function renderVisualization() {{
+                const container = document.getElementById('graph-container');
+                
+                // Clear any previous visualization
+                container.innerHTML = '';
+                
+                // Get container dimensions
+                const width = container.clientWidth;
+                const height = container.clientHeight;
+                
+                // Transform project data for D3
+                const graphData = transformProjectData(projectMap);
+                
+                // Create SVG
+                const svg = d3.select('#graph-container')
+                    .append('svg')
+                    .attr('width', width)
+                    .attr('height', height)
+                    .attr('viewBox', [0, 0, width, height])
+                    .call(d3.zoom().on('zoom', (event) => {{
+                        g.attr('transform', event.transform);
+                    }}));
+                
+                const g = svg.append('g');
+                
+                // Create tooltip
+                const tooltip = d3.select('#visualization')
+                    .append('div')
+                    .attr('class', 'tooltip')
+                    .style('opacity', 0);
+                
+                // Create links
+                const link = g.append('g')
+                    .selectAll('line')
+                    .data(graphData.links)
+                    .enter()
+                    .append('line')
+                    .attr('class', 'link')
+                    .attr('stroke-dasharray', d => d.type === 'parameter' ? '5,5' : 'none');
+                
+                // Define different node types
+                const node = g.append('g')
+                    .selectAll('.node')
+                    .data(graphData.nodes)
+                    .enter()
+                    .append('g')
+                    .attr('class', d => `node node-${{d.type}}`)
+                    .call(d3.drag()
+                        .on('start', dragStarted)
+                        .on('drag', dragged)
+                        .on('end', dragEnded));
+                
+                // Add circles to nodes
+                node.append('circle')
+                    .attr('r', d => d.type === 'route' ? 10 : (d.type === 'model' ? 8 : 6))
+                    .attr('stroke', '#fff');
+                
+                // Add text labels to nodes
+                node.append('text')
+                    .attr('dy', 20)
+                    .attr('text-anchor', 'middle')
+                    .text(d => d.name)
+                    .each(function(d) {{
+                        const self = d3.select(this);
+                        const textLength = self.node().getComputedTextLength();
+                        
+                        // If text is too long, truncate it
+                        if (textLength > 100) {{
+                            self.text(d.name.substring(0, 20) + '...');
+                        }}
+                    }});
+                
+                // Add hover behavior
+                node.on('mouseover', function(event, d) {{
+                    // Highlight connected links and nodes
+                    link.style('stroke-opacity', l => {{
+                        if (l.source.id === d.id || l.target.id === d.id) {{
+                            return 1;
+                        }} else {{
+                            return 0.2;
+                        }}
+                    }})
+                    .style('stroke-width', l => {{
+                        if (l.source.id === d.id || l.target.id === d.id) {{
+                            return 3;
+                        }} else {{
+                            return 1.5;
+                        }}
+                    }});
+                    
+                    node.style('opacity', n => {{
+                        return isConnected(d, n) ? 1 : 0.2;
+                    }});
+                    
+                    // Show tooltip with details
+                    tooltip.transition()
+                        .duration(200)
+                        .style('opacity', 0.9);
+                    
+                    let tooltipContent = `<strong>${{d.name}}</strong><br/>Type: ${{d.type}}<br/>`;
+                    
+                    if (d.type === 'route') {{
+                        tooltipContent += `
+                            Path: ${{d.details.path}}<br/>
+                            Methods: ${{Array.isArray(d.details.methods) ? d.details.methods.join(', ') : d.details.methods}}<br/>
+                            Handler: ${{d.details.endpoint}}<br/>
+                            ${{d.details.response_model ? `Response Model: ${{d.details.response_model}}<br/>` : ''}}
+                        `;
+                    }} else if (d.type === 'model') {{
+                        tooltipContent += `
+                            Module: ${{d.details.module}}<br/>
+                            Fields: ${{d.details.fields.length}}<br/>
+                        `;
+                    }}
+                    
+                    tooltip.html(tooltipContent)
+                        .style('left', (event.pageX + 10) + 'px')
+                        .style('top', (event.pageY - 28) + 'px');
+                }})
+                .on('mouseout', function() {{
+                    // Restore original appearance
+                    link.style('stroke-opacity', 0.6).style('stroke-width', 1.5);
+                    node.style('opacity', 1);
+                    
+                    // Hide tooltip
+                    tooltip.transition()
+                        .duration(500)
+                        .style('opacity', 0);
+                }});
+                
+                // Check if two nodes are connected
+                function isConnected(a, b) {{
+                    if (a.id === b.id) return true;
+                    
+                    return graphData.links.some(l => {{
+                        return (l.source.id === a.id && l.target.id === b.id) ||
+                               (l.source.id === b.id && l.target.id === a.id);
+                    }});
+                }}
+                
+                // Initialize force simulation
+                const simulation = d3.forceSimulation(graphData.nodes)
+                    .force('link', d3.forceLink(graphData.links).id(d => d.id).distance(100))
+                    .force('charge', d3.forceManyBody().strength(-300))
+                    .force('center', d3.forceCenter(width / 2, height / 2))
+                    .force('collide', d3.forceCollide().radius(40))
+                    .on('tick', ticked);
+                
+                // Update positions on each tick
+                function ticked() {{
+                    link
+                        .attr('x1', d => d.source.x)
+                        .attr('y1', d => d.source.y)
+                        .attr('x2', d => d.target.x)
+                        .attr('y2', d => d.target.y);
+                    
+                    node.attr('transform', d => `translate(${{d.x}},${{d.y}})`);
+                }}
+                
+                // Drag functions
+                function dragStarted(event, d) {{
+                    if (!event.active) simulation.alphaTarget(0.3).restart();
+                    d.fx = d.x;
+                    d.fy = d.y;
+                }}
+                
+                function dragged(event, d) {{
+                    d.fx = event.x;
+                    d.fy = event.y;
+                }}
+                
+                function dragEnded(event, d) {{
+                    if (!event.active) simulation.alphaTarget(0);
+                    d.fx = null;
+                    d.fy = null;
+                }}
+                
+                // Zoom controls
+                document.getElementById('zoom-in').addEventListener('click', function() {{
+                    const currentTransform = d3.zoomTransform(svg.node());
+                    svg.transition().duration(500).call(
+                        d3.zoom().on('zoom', event => g.attr('transform', event.transform))
+                            .transform, 
+                        d3.zoomIdentity.translate(currentTransform.x, currentTransform.y).scale(currentTransform.k * 1.5)
+                    );
+                }});
+                
+                document.getElementById('zoom-out').addEventListener('click', function() {{
+                    const currentTransform = d3.zoomTransform(svg.node());
+                    svg.transition().duration(500).call(
+                        d3.zoom().on('zoom', event => g.attr('transform', event.transform))
+                            .transform, 
+                        d3.zoomIdentity.translate(currentTransform.x, currentTransform.y).scale(currentTransform.k / 1.5)
+                    );
+                }});
+                
+                document.getElementById('reset').addEventListener('click', function() {{
+                    svg.transition().duration(500).call(
+                        d3.zoom().on('zoom', event => g.attr('transform', event.transform))
+                            .transform, 
+                        d3.zoomIdentity
+                    );
+                }});
+            }}
+            
+            // Initialize the visualization
+            window.addEventListener('load', function() {{
+                renderVisualization();
+            }});
+            
+            // Handle window resize
+            window.addEventListener('resize', function() {{
+                renderVisualization();
+            }});
         </script>
     </body>
     </html>

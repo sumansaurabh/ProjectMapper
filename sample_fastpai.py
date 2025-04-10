@@ -11,7 +11,7 @@ app = FastAPI(
 )
 
 # Initialize the project mapper
-mapper = map_project(app)
+mapper = map_project(app, base_path="/api")
 
 # Pydantic models for request and response
 class Item(BaseModel):
