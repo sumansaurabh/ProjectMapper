@@ -1,12 +1,14 @@
 import inspect
 import sys
-from typing import Dict, List, Any, Type, Set
+import os
+from typing import Dict, List, Any, Type, Set, Optional
 from pydantic import BaseModel
 
 
 class ModelAnalyzer:
-    def __init__(self):
+    def __init__(self, project_root: Optional[str] = None):
         self.discovered_models = set()
+        self.project_root = project_root
         
     def extract_models_from_routes(self, routes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Extract Pydantic models from route parameters and responses."""
@@ -36,6 +38,20 @@ class ModelAnalyzer:
             if model_name:
                 model_references.add(model_name)
     
+    def _is_project_module(self, module) -> bool:
+        """Check if a module is part of the project."""
+        if not self.project_root:
+            # If project_root is not specified, we'll consider internal modules only
+            return not (hasattr(module, '__file__') and 
+                       (module.__file__ is None or 
+                        'site-packages' in str(module.__file__) or
+                        'dist-packages' in str(module.__file__)))
+        
+        if not hasattr(module, '__file__') or module.__file__ is None:
+            return False
+        
+        return os.path.commonpath([self.project_root]) == os.path.commonpath([self.project_root, module.__file__])
+    
     def _analyze_models(self, model_references: Set[str]) -> List[Dict[str, Any]]:
         """Analyze models found in the project."""
         models = []
@@ -46,35 +62,43 @@ class ModelAnalyzer:
         # Find all Pydantic models in loaded modules
         for module_name, module in modules_items:
             if not module_name.startswith('_') and module:
+                # Skip external modules/dependencies
+                if not self._is_project_module(module):
+                    continue
+                
                 try:
                     for name, obj in inspect.getmembers(module):
-                        if (inspect.isclass(obj) and issubclass(obj, BaseModel) and 
-                            obj.__module__ == module.__name__ and 
-                            obj != BaseModel):
-                            
-                            # Skip if we've already processed this model
-                            if obj in self.discovered_models:
-                                continue
+                        try:
+                            if (inspect.isclass(obj) and issubclass(obj, BaseModel) and 
+                                obj.__module__ == module.__name__ and 
+                                obj != BaseModel):
                                 
-                            self.discovered_models.add(obj)
-                            
-                            # Extract model fields
-                            fields = []
-                            for field_name, field_info in obj.__fields__.items():
-                                fields.append({
-                                    "name": field_name,
-                                    "type": str(field_info.outer_type_),
-                                    "required": field_info.required,
-                                    "default": str(field_info.default) if not field_info.required else None
+                                # Skip if we've already processed this model
+                                if obj in self.discovered_models:
+                                    continue
+                                    
+                                self.discovered_models.add(obj)
+                                
+                                # Extract model fields
+                                fields = []
+                                for field_name, field_info in obj.__fields__.items():
+                                    fields.append({
+                                        "name": field_name,
+                                        "type": str(field_info.outer_type_),
+                                        "required": field_info.required,
+                                        "default": str(field_info.default) if not field_info.required else None
+                                    })
+                                
+                                models.append({
+                                    "name": obj.__name__,
+                                    "module": obj.__module__,
+                                    "fields": fields
                                 })
-                            
-                            models.append({
-                                "name": obj.__name__,
-                                "module": obj.__module__,
-                                "fields": fields
-                            })
-                except (ImportError, AttributeError):
+                        except (TypeError, AttributeError):
+                            # Skip any class that can't be properly analyzed
+                            continue
+                except Exception:
                     # Skip any modules that can't be inspected
-                    pass
+                    continue
         
         return models
