@@ -40,12 +40,23 @@ class ModelAnalyzer:
     
     def _is_project_module(self, module) -> bool:
         """Check if a module is part of the project."""
+        # Skip known problematic modules and packages
+        if hasattr(module, "__name__"):
+            module_name = module.__name__
+            # Skip OpenAI modules and other common external libraries
+            if any(module_name.startswith(prefix) for prefix in [
+                'openai', 'numpy', 'pandas', 'tensorflow', 'torch', 'sklearn', 
+                'matplotlib', 'requests', 'boto3', 'flask', 'django', 'fastapi.', 
+                'pydantic.', 'starlette', 'sqlalchemy', 'pytest'
+            ]):
+                return False
+        
         if not self.project_root:
             # If project_root is not specified, we'll consider internal modules only
             return not (hasattr(module, '__file__') and 
-                       (module.__file__ is None or 
-                        'site-packages' in str(module.__file__) or
-                        'dist-packages' in str(module.__file__)))
+                      (module.__file__ is None or 
+                       'site-packages' in str(module.__file__) or
+                       'dist-packages' in str(module.__file__)))
         
         try:
             if not hasattr(module, '__file__') or module.__file__ is None:
@@ -55,8 +66,7 @@ class ModelAnalyzer:
             module_path = os.path.normpath(os.path.abspath(module.__file__))
             project_path = os.path.normpath(os.path.abspath(self.project_root))
             
-            # Simple path prefix check - more reliable for big projects
-            # This checks if the module's path starts with the project's path
+            # Simple path prefix check
             return module_path.startswith(project_path)
         except Exception:
             # If we can't determine the module's file, treat it as external
@@ -71,44 +81,60 @@ class ModelAnalyzer:
         
         # Find all Pydantic models in loaded modules
         for module_name, module in modules_items:
-            if not module_name.startswith('_') and module:
-                # Skip external modules/dependencies
-                if not self._is_project_module(module):
-                    continue
+            # Skip modules with underscore prefix and empty modules
+            if module_name.startswith('_') or not module:
+                continue
                 
-                try:
-                    for name, obj in inspect.getmembers(module):
-                        try:
-                            if (inspect.isclass(obj) and issubclass(obj, BaseModel) and 
-                                obj.__module__ == module.__name__ and 
-                                obj != BaseModel):
+            # Skip external modules/dependencies earlier in the process
+            if not self._is_project_module(module):
+                continue
+            
+            try:
+                # Define a safe get_members function to avoid problematic attribute access
+                def safe_getmembers(module):
+                    try:
+                        # Only return members that can be accessed without triggering lazy loading
+                        for name in dir(module):
+                            try:
+                                obj = getattr(module, name)
+                                yield name, obj
+                            except (AttributeError, ImportError, Exception):
+                                continue
+                    except Exception:
+                        return []
+                
+                for name, obj in safe_getmembers(module):
+                    try:
+                        if (inspect.isclass(obj) and issubclass(obj, BaseModel) and 
+                            obj.__module__ == module.__name__ and 
+                            obj != BaseModel):
+                            
+                            # Skip if we've already processed this model
+                            if obj in self.discovered_models:
+                                continue
                                 
-                                # Skip if we've already processed this model
-                                if obj in self.discovered_models:
-                                    continue
-                                    
-                                self.discovered_models.add(obj)
-                                
-                                # Extract model fields
-                                fields = []
-                                for field_name, field_info in obj.__fields__.items():
-                                    fields.append({
-                                        "name": field_name,
-                                        "type": str(field_info.outer_type_),
-                                        "required": field_info.required,
-                                        "default": str(field_info.default) if not field_info.required else None
-                                    })
-                                
-                                models.append({
-                                    "name": obj.__name__,
-                                    "module": obj.__module__,
-                                    "fields": fields
+                            self.discovered_models.add(obj)
+                            
+                            # Extract model fields
+                            fields = []
+                            for field_name, field_info in obj.__fields__.items():
+                                fields.append({
+                                    "name": field_name,
+                                    "type": str(field_info.outer_type_),
+                                    "required": field_info.required,
+                                    "default": str(field_info.default) if not field_info.required else None
                                 })
-                        except (TypeError, AttributeError):
-                            # Skip any class that can't be properly analyzed
-                            continue
-                except Exception:
-                    # Skip any modules that can't be inspected
-                    continue
+                            
+                            models.append({
+                                "name": obj.__name__,
+                                "module": obj.__module__,
+                                "fields": fields
+                            })
+                    except (TypeError, AttributeError, Exception):
+                        # Skip any class that can't be properly analyzed
+                        continue
+            except Exception:
+                # Skip any modules that can't be inspected
+                continue
         
         return models
