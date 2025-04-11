@@ -2,11 +2,13 @@ import inspect
 from typing import Dict, List, Any, Callable, Set
 from fastapi import FastAPI, APIRouter, Depends
 from fastapi.routing import APIRoute
+from .codeflow import CodeFlowAnalyzer
 
 
 class RouteScanner:
     def __init__(self, app: FastAPI):
         self.app = app
+        self.flow_analyzer = CodeFlowAnalyzer()
         
     def scan_routes(self) -> List[Dict[str, Any]]:
         """Scan all routes in the FastAPI application."""
@@ -58,6 +60,9 @@ class RouteScanner:
                     "default": str(param.default) if param.default is not inspect.Parameter.empty else None
                 })
         
+        # Analyze code flow
+        code_flow = self.flow_analyzer.analyze_function(endpoint_func, source_file)
+        
         return {
             "path": path,
             "methods": route.methods,
@@ -70,6 +75,7 @@ class RouteScanner:
             "source_file": source_file,
             "source_line": source_line,
             "response_model": str(route.response_model) if route.response_model else None,
+            "code_flow": code_flow
         }
     
     def _extract_dependencies(self, dependencies: List[Any]) -> List[Dict[str, Any]]:
@@ -78,8 +84,23 @@ class RouteScanner:
         for dep in dependencies:
             if hasattr(dep, "dependency"):
                 dependency_callable = dep.dependency
+                
+                # Get source file for dependency
+                try:
+                    source_file = inspect.getfile(dependency_callable)
+                except (TypeError, OSError):
+                    source_file = "Unknown"
+                
+                # Analyze dependency code flow
+                code_flow = self.flow_analyzer.analyze_function(dependency_callable, source_file)
+                
                 results.append({
                     "name": dependency_callable.__name__ if hasattr(dependency_callable, "__name__") else str(dependency_callable),
-                    "callable": str(dependency_callable)
+                    "callable": str(dependency_callable),
+                    "code_flow": code_flow
                 })
         return results
+    
+    def get_data_flow_analysis(self) -> Dict[str, Any]:
+        """Get complete data flow analysis for all routes."""
+        return self.flow_analyzer.build_execution_flow(self.scan_routes())

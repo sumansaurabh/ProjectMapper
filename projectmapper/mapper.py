@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from .scanner import RouteScanner
 from .models import ModelAnalyzer
-from .visualization import generate_html_visualization
+from .visualization import generate_html_visualization, generate_data_flow_visualization
 from .dependencies import DependencyAnalyzer
 
 
@@ -42,6 +42,17 @@ class ProjectMapper:
             from fastapi.responses import HTMLResponse
             return HTMLResponse(content=self.generate_visualization(), status_code=200)
         
+        # Add a route for data flow analysis
+        @self.app.get(f"{self.base_path}/dataflow/json", include_in_schema=False)
+        async def view_data_flow():
+            return self.generate_data_flow_map()
+            
+        # Add a route for data flow visualization
+        @self.app.get(f"{self.base_path}/dataflow/html", include_in_schema=False)
+        async def view_data_flow_visualization():
+            from fastapi.responses import HTMLResponse
+            return HTMLResponse(content=self.generate_data_flow_visualization(), status_code=200)
+        
         self._initialized = True
         
     def generate_map(self) -> Dict[str, Any]:
@@ -56,10 +67,22 @@ class ProjectMapper:
             "dependencies": dependencies
         }
     
+    def generate_data_flow_map(self) -> Dict[str, Any]:
+        """Generate a structured map of the project's data flow."""
+        data_flow = self.route_scanner.get_data_flow_analysis()
+        return {
+            "data_flow": data_flow
+        }
+    
     def generate_visualization(self) -> str:
         """Generate HTML visualization of the project map."""
         project_map = self.generate_map()
         return generate_html_visualization(project_map)
+    
+    def generate_data_flow_visualization(self) -> str:
+        """Generate HTML visualization of the data flow."""
+        data_flow_map = self.generate_data_flow_map()
+        return generate_data_flow_visualization(data_flow_map)
 
 
 def map_project(app: FastAPI, base_path: str = "/_project") -> ProjectMapper:

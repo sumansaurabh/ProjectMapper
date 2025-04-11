@@ -33,14 +33,42 @@ def read_root():
 - Identifies Pydantic models used in your application
 - Analyzes dependencies between components
 - Provides interactive visualization via web interface
-- Available at `/_project_map` and `/_project_visualization` endpoints
+- Deep data flow analysis between components
+- Database operation detection and visualization
+- Complete execution flow tracking
 
-## Example
+## Endpoints
 
-After initializing ProjectMapper with your FastAPI application, you can:
+ProjectMapper adds these endpoints to your FastAPI application:
 
-1. Access `http://localhost:8000/_project_map` to see a JSON representation of your project structure
-2. Access `http://localhost:8000/_project_visualization` to see a visual representation of your project
+| Endpoint | Description |
+|----------|-------------|
+| `/_project/json` | JSON representation of your project structure |
+| `/_project/html` | Visual representation of your project structure |
+| `/_project/dataflow/json` | JSON representation of your project's data flow |
+| `/_project/dataflow/html` | Interactive visualization of your project's data flow |
+
+You can customize the base path by passing it to the `map_project` function:
+
+```python
+mapper = map_project(app, base_path="/api/internal/project")
+```
+
+## Data Flow Analysis
+
+The data flow analysis provides:
+
+- Function call chains for each route
+- Data references and transformations
+- Database operation detection
+- Complete execution flow visualization
+
+This helps you understand:
+
+- How data flows from requests to responses
+- Which functions are called during request processing
+- What database operations are triggered
+- How dependencies interact with each other
 
 ## License
 
