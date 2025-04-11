@@ -1,5 +1,6 @@
 import json
 from typing import Dict, Any, List
+from collections import defaultdict
 
 
 class SetEncoder(json.JSONEncoder):
@@ -12,6 +13,10 @@ class SetEncoder(json.JSONEncoder):
 
 def generate_html_visualization(project_map: Dict[str, Any]) -> str:
     """Generate an HTML visualization of the project map."""
+    # Group routes by prefix
+    grouped_routes = group_routes_by_prefix(project_map["routes"])
+    project_map["grouped_routes"] = grouped_routes
+    
     routes_html = _generate_routes_html(project_map["routes"])
     models_html = _generate_models_html(project_map["models"])
     dependencies_html = _generate_dependencies_html(project_map["dependencies"])
@@ -47,7 +52,7 @@ def generate_html_visualization(project_map: Dict[str, Any]) -> str:
             .method.delete {{ background-color: #f93e3e; color: white; }}
             .method.patch {{ background-color: #50e3c2; color: white; }}
             #visualization {{ height: 700px; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; position: relative; }}
-            #graph-container {{ width: 100%; height: 100%; }}
+            #graph-container {{ width: 100%; height: 100%; overflow: auto; }}
             
             /* D3 Visualization Styles */
             .node {{ cursor: pointer; }}
@@ -118,6 +123,36 @@ def generate_html_visualization(project_map: Dict[str, Any]) -> str:
             button:hover {{
                 background: #ddd;
             }}
+            
+            .group-node rect {{
+                fill: #e8e8e8;
+                stroke: #aaa;
+                rx: 5;
+                ry: 5;
+            }}
+            
+            .route-group {{
+                margin-bottom: 20px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                overflow: hidden;
+            }}
+            
+            .route-group-header {{
+                background: #f1f1f1;
+                padding: 10px;
+                font-weight: bold;
+                border-bottom: 1px solid #ddd;
+                cursor: pointer;
+            }}
+            
+            .route-group-content {{
+                padding: 10px;
+            }}
+            
+            .collapsed .route-group-content {{
+                display: none;
+            }}
         </style>
     </head>
     <body>
@@ -149,6 +184,10 @@ def generate_html_visualization(project_map: Dict[str, Any]) -> str:
                             <div class="legend-item">
                                 <span class="legend-color" style="background-color: #49cc90;"></span>
                                 <span>Dependencies</span>
+                            </div>
+                            <div class="legend-item">
+                                <span class="legend-color" style="background-color: #e8e8e8;"></span>
+                                <span>Route Groups</span>
                             </div>
                         </div>
                         <div class="controls">
@@ -197,6 +236,19 @@ def generate_html_visualization(project_map: Dict[str, Any]) -> str:
                 if (tabName === 'visualization-tab') {{
                     renderVisualization();
                 }}
+                
+                if (tabName === 'routes-tab') {{
+                    initRouteGroupToggles();
+                }}
+            }}
+            
+            function initRouteGroupToggles() {{
+                const headers = document.getElementsByClassName('route-group-header');
+                for (let i = 0; i < headers.length; i++) {{
+                    headers[i].addEventListener('click', function() {{
+                        this.parentNode.classList.toggle('collapsed');
+                    }});
+                }}
             }}
             
             // Transform the project map into a format suitable for D3
@@ -206,9 +258,27 @@ def generate_html_visualization(project_map: Dict[str, Any]) -> str:
                 const nodeMap = new Map();
                 let nodeId = 0;
                 
+                // Add route groups as nodes
+                const groupedRoutes = projectMap.grouped_routes;
+                Object.keys(groupedRoutes).forEach(prefix => {{
+                    if (prefix !== '/') {{  // Skip root group
+                        const id = 'group_' + nodeId++;
+                        const node = {{
+                            id: id,
+                            name: prefix,
+                            type: 'group',
+                            details: {{ name: prefix, count: groupedRoutes[prefix].length }},
+                            routes: groupedRoutes[prefix].map(r => r.endpoint)
+                        }};
+                        
+                        nodes.push(node);
+                        nodeMap.set(prefix, id);
+                    }}
+                }});
+                
                 // Add routes as nodes
                 projectMap.routes.forEach(route => {{
-                    const id = nodeId++;
+                    const id = 'route_' + nodeId++;
                     const methodString = Array.isArray(route.methods) ? 
                         route.methods.join(', ') : route.methods;
                         
@@ -222,11 +292,21 @@ def generate_html_visualization(project_map: Dict[str, Any]) -> str:
                     
                     nodes.push(node);
                     nodeMap.set(route.endpoint, id);
+                    
+                    // Connect routes to their groups
+                    const routePrefix = getRoutePrefix(route.path);
+                    if (routePrefix !== '/' && nodeMap.has(routePrefix)) {{
+                        links.push({{
+                            source: nodeMap.get(routePrefix),
+                            target: id,
+                            type: 'group_member'
+                        }});
+                    }}
                 }});
                 
                 // Add models as nodes
                 projectMap.models.forEach(model => {{
-                    const id = nodeId++;
+                    const id = 'model_' + nodeId++;
                     const node = {{
                         id: id,
                         name: model.name,
@@ -246,7 +326,7 @@ def generate_html_visualization(project_map: Dict[str, Any]) -> str:
                 
                 allDeps.forEach(dep => {{
                     if (!nodeMap.has(dep)) {{
-                        const id = nodeId++;
+                        const id = 'dep_' + nodeId++;
                         const node = {{
                             id: id,
                             name: dep,
@@ -316,6 +396,20 @@ def generate_html_visualization(project_map: Dict[str, Any]) -> str:
                 return {{ nodes, links }};
             }}
             
+            // Helper function to get the prefix for grouping
+            function getRoutePrefix(path) {{
+                if (!path.startsWith('/')) {{
+                    path = '/' + path;
+                }}
+                
+                const parts = path.split('/');
+                if (parts.length <= 2) {{
+                    return '/';  // Root group
+                }}
+                
+                return '/' + parts[1];  // First-level grouping
+            }}
+            
             function renderVisualization() {{
                 const container = document.getElementById('graph-container');
                 
@@ -332,8 +426,8 @@ def generate_html_visualization(project_map: Dict[str, Any]) -> str:
                 // Create SVG
                 const svg = d3.select('#graph-container')
                     .append('svg')
-                    .attr('width', width)
-                    .attr('height', height)
+                    .attr('width', width * 2)  // Make SVG larger than container to allow scrolling
+                    .attr('height', height * 2)
                     .attr('viewBox', [0, 0, width, height])
                     .call(d3.zoom().on('zoom', (event) => {{
                         g.attr('transform', event.transform);
@@ -356,10 +450,34 @@ def generate_html_visualization(project_map: Dict[str, Any]) -> str:
                     .attr('class', 'link')
                     .attr('stroke-dasharray', d => d.type === 'parameter' ? '5,5' : 'none');
                 
+                // Create groups for different node types
+                const groups = g.append('g').selectAll('.group-node')
+                    .data(graphData.nodes.filter(d => d.type === 'group'))
+                    .enter()
+                    .append('g')
+                    .attr('class', 'node group-node')
+                    .call(d3.drag()
+                        .on('start', dragStarted)
+                        .on('drag', dragged)
+                        .on('end', dragEnded));
+                
+                // Add rectangles to group nodes
+                groups.append('rect')
+                    .attr('width', 120)
+                    .attr('height', 40)
+                    .attr('x', -60)  // Center rect on node position
+                    .attr('y', -20);
+                
+                // Add text to group nodes
+                groups.append('text')
+                    .attr('dy', 5)
+                    .attr('text-anchor', 'middle')
+                    .text(d => `${{d.name}} (${{d.details.count}})`);
+                
                 // Define different node types
                 const node = g.append('g')
-                    .selectAll('.node')
-                    .data(graphData.nodes)
+                    .selectAll('.node:not(.group-node)')
+                    .data(graphData.nodes.filter(d => d.type !== 'group'))
                     .enter()
                     .append('g')
                     .attr('class', d => `node node-${{d.type}}`)
@@ -388,63 +506,68 @@ def generate_html_visualization(project_map: Dict[str, Any]) -> str:
                         }}
                     }});
                 
-                // Add hover behavior
-                node.on('mouseover', function(event, d) {{
-                    // Highlight connected links and nodes
-                    link.style('stroke-opacity', l => {{
-                        if (l.source.id === d.id || l.target.id === d.id) {{
-                            return 1;
-                        }} else {{
-                            return 0.2;
+                // Add hover behavior to nodes
+                const allNodes = g.selectAll('.node')
+                    .on('mouseover', function(event, d) {{
+                        // Highlight connected links and nodes
+                        link.style('stroke-opacity', l => {{
+                            if (l.source.id === d.id || l.target.id === d.id) {{
+                                return 1;
+                            }} else {{
+                                return 0.2;
+                            }}
+                        }})
+                        .style('stroke-width', l => {{
+                            if (l.source.id === d.id || l.target.id === d.id) {{
+                                return 3;
+                            }} else {{
+                                return 1.5;
+                            }}
+                        }});
+                        
+                        g.selectAll('.node').style('opacity', n => {{
+                            return isConnected(d, n) ? 1 : 0.2;
+                        }});
+                        
+                        // Show tooltip with details
+                        tooltip.transition()
+                            .duration(200)
+                            .style('opacity', 0.9);
+                        
+                        let tooltipContent = `<strong>${{d.name}}</strong><br/>Type: ${{d.type}}<br/>`;
+                        
+                        if (d.type === 'route') {{
+                            tooltipContent += `
+                                Path: ${{d.details.path}}<br/>
+                                Methods: ${{Array.isArray(d.details.methods) ? d.details.methods.join(', ') : d.details.methods}}<br/>
+                                Handler: ${{d.details.endpoint}}<br/>
+                                ${{d.details.response_model ? `Response Model: ${{d.details.response_model}}<br/>` : ''}}
+                            `;
+                        }} else if (d.type === 'model') {{
+                            tooltipContent += `
+                                Module: ${{d.details.module}}<br/>
+                                Fields: ${{d.details.fields.length}}<br/>
+                            `;
+                        }} else if (d.type === 'group') {{
+                            tooltipContent += `
+                                Contains: ${{d.details.count}} routes<br/>
+                            `;
                         }}
+                        
+                        tooltip.html(tooltipContent)
+                            .style('left', (event.pageX + 10) + 'px')
+                            .style('top', (event.pageY - 28) + 'px');
                     }})
-                    .style('stroke-width', l => {{
-                        if (l.source.id === d.id || l.target.id === d.id) {{
-                            return 3;
-                        }} else {{
-                            return 1.5;
-                        }}
+                    .on('mouseout', function() {{
+                        // Restore original appearance
+                        link.style('stroke-opacity', 0.6).style('stroke-width', 1.5);
+                        g.selectAll('.node').style('opacity', 1);
+                        
+                        // Hide tooltip
+                        tooltip.transition()
+                            .duration(500)
+                            .style('opacity', 0);
                     }});
-                    
-                    node.style('opacity', n => {{
-                        return isConnected(d, n) ? 1 : 0.2;
-                    }});
-                    
-                    // Show tooltip with details
-                    tooltip.transition()
-                        .duration(200)
-                        .style('opacity', 0.9);
-                    
-                    let tooltipContent = `<strong>${{d.name}}</strong><br/>Type: ${{d.type}}<br/>`;
-                    
-                    if (d.type === 'route') {{
-                        tooltipContent += `
-                            Path: ${{d.details.path}}<br/>
-                            Methods: ${{Array.isArray(d.details.methods) ? d.details.methods.join(', ') : d.details.methods}}<br/>
-                            Handler: ${{d.details.endpoint}}<br/>
-                            ${{d.details.response_model ? `Response Model: ${{d.details.response_model}}<br/>` : ''}}
-                        `;
-                    }} else if (d.type === 'model') {{
-                        tooltipContent += `
-                            Module: ${{d.details.module}}<br/>
-                            Fields: ${{d.details.fields.length}}<br/>
-                        `;
-                    }}
-                    
-                    tooltip.html(tooltipContent)
-                        .style('left', (event.pageX + 10) + 'px')
-                        .style('top', (event.pageY - 28) + 'px');
-                }})
-                .on('mouseout', function() {{
-                    // Restore original appearance
-                    link.style('stroke-opacity', 0.6).style('stroke-width', 1.5);
-                    node.style('opacity', 1);
-                    
-                    // Hide tooltip
-                    tooltip.transition()
-                        .duration(500)
-                        .style('opacity', 0);
-                }});
                 
                 // Check if two nodes are connected
                 function isConnected(a, b) {{
@@ -472,7 +595,7 @@ def generate_html_visualization(project_map: Dict[str, Any]) -> str:
                         .attr('x2', d => d.target.x)
                         .attr('y2', d => d.target.y);
                     
-                    node.attr('transform', d => `translate(${{d.x}},${{d.y}})`);
+                    allNodes.attr('transform', d => `translate(${{d.x}},${{d.y}})`);
                 }}
                 
                 // Drag functions
@@ -524,6 +647,7 @@ def generate_html_visualization(project_map: Dict[str, Any]) -> str:
             // Initialize the visualization
             window.addEventListener('load', function() {{
                 renderVisualization();
+                initRouteGroupToggles();
             }});
             
             // Handle window resize
@@ -537,25 +661,70 @@ def generate_html_visualization(project_map: Dict[str, Any]) -> str:
 
 def _generate_routes_html(routes):
     """Generate HTML for routes section."""
+    # Group routes by prefix
+    grouped_routes = group_routes_by_prefix(routes)
+    
     html = ""
-    for route in routes:
-        methods_html = ""
-        for method in route["methods"]:
-            method_lower = method.lower()
-            methods_html += f'<span class="method {method_lower}">{method}</span>'
+    for prefix, prefix_routes in grouped_routes.items():
+        # Skip empty groups
+        if not prefix_routes:
+            continue
+            
+        group_id = prefix.replace('/', '_')
+        if not group_id:
+            group_id = "root"
         
         html += f"""
-        <div class="route">
-            <h3>{methods_html} {route["path"]}</h3>
-            <p><strong>Handler:</strong> {route["endpoint"]}</p>
-            <p><strong>Signature:</strong> {route["signature"]}</p>
-            <p><strong>Source:</strong> {route["source_file"]}:{route["source_line"]}</p>
-            <p><strong>Response Model:</strong> {route["response_model"] or "None"}</p>
-            <p><strong>Dependencies:</strong> {', '.join([dep["name"] for dep in route["dependencies"]]) or "None"}</p>
-            <p><strong>Description:</strong> {route["docstring"]}</p>
+        <div class="route-group" id="group-{group_id}">
+            <div class="route-group-header">{prefix} ({len(prefix_routes)} routes)</div>
+            <div class="route-group-content">
+        """
+        
+        for route in prefix_routes:
+            methods_html = ""
+            for method in route["methods"]:
+                method_lower = method.lower()
+                methods_html += f'<span class="method {method_lower}">{method}</span>'
+            
+            html += f"""
+            <div class="route">
+                <h3>{methods_html} {route["path"]}</h3>
+                <p><strong>Handler:</strong> {route["endpoint"]}</p>
+                <p><strong>Signature:</strong> {route["signature"]}</p>
+                <p><strong>Source:</strong> {route["source_file"]}:{route["source_line"]}</p>
+                <p><strong>Response Model:</strong> {route["response_model"] or "None"}</p>
+                <p><strong>Dependencies:</strong> {', '.join([dep["name"] for dep in route["dependencies"]]) or "None"}</p>
+                <p><strong>Description:</strong> {route["docstring"]}</p>
+            </div>
+            """
+        
+        html += """
+            </div>
         </div>
         """
+    
     return html
+
+def group_routes_by_prefix(routes):
+    """Group routes by common path prefixes."""
+    grouped_routes = defaultdict(list)
+    
+    for route in routes:
+        path = route["path"]
+        if not path.startswith('/'):
+            path = '/' + path
+            
+        parts = path.split('/')
+        if len(parts) <= 2:
+            # Root route (like "/" or "/users")
+            prefix = '/'
+        else:
+            # Get first-level prefix like "/api" from "/api/users"
+            prefix = '/' + parts[1]
+            
+        grouped_routes[prefix].append(route)
+        
+    return dict(grouped_routes)
 
 def _generate_models_html(models):
     """Generate HTML for models section."""
@@ -617,7 +786,8 @@ def generate_data_flow_visualization(data_flow_map: Dict[str, Any]) -> str:
             .tab-content {{ display: none; padding: 20px; }}
             .tab-content.active {{ display: block; }}
             
-            #data-flow-visualization {{ height: 800px; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; position: relative; }}
+            #data-flow-visualization {{ height: 800px; border: 1px solid #ddd; border-radius: 4px; position: relative; }}
+            #graph-container {{ width: 100%; height: 100%; overflow: auto; }}
             
             .node rect {{ stroke: #333; fill: #fff; }}
             .node text {{ font-size: 12px; }}
@@ -711,6 +881,18 @@ def generate_data_flow_visualization(data_flow_map: Dict[str, Any]) -> str:
                 border-radius: 5px;
                 overflow-x: auto;
             }}
+            
+            .controls {{
+                position: absolute;
+                bottom: 10px;
+                left: 10px;
+                background: white;
+                padding: 5px 10px;
+                border-radius: 4px;
+                border: 1px solid #ddd;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                z-index: 100;
+            }}
         </style>
     </head>
     <body>
@@ -728,6 +910,7 @@ def generate_data_flow_visualization(data_flow_map: Dict[str, Any]) -> str:
                     <p>This diagram shows how data flows through your FastAPI application, including function calls, database operations, and data transformations.</p>
                     
                     <div id="data-flow-visualization">
+                        <div id="graph-container"></div>
                         <div class="legend">
                             <h3>Legend</h3>
                             <div class="legend-item">
@@ -746,6 +929,11 @@ def generate_data_flow_visualization(data_flow_map: Dict[str, Any]) -> str:
                                 <span class="legend-color" style="background-color: #f93e3e;"></span>
                                 <span>Models/Data</span>
                             </div>
+                        </div>
+                        <div class="controls">
+                            <button id="zoom-in">+ Zoom In</button>
+                            <button id="zoom-out">- Zoom Out</button>
+                            <button id="reset">Reset</button>
                         </div>
                     </div>
                 </div>
@@ -786,6 +974,9 @@ def generate_data_flow_visualization(data_flow_map: Dict[str, Any]) -> str:
             }}
             
             function renderGraph() {{
+                // Clear the container
+                document.getElementById('graph-container').innerHTML = '';
+                
                 // Create a new directed graph
                 const g = new dagreD3.graphlib.Graph().setGraph({{
                     rankdir: "TB",
@@ -851,36 +1042,60 @@ def generate_data_flow_visualization(data_flow_map: Dict[str, Any]) -> str:
                 // Create a renderer and run it
                 const render = new dagreD3.render();
                 
-                // Set up SVG
-                const svg = d3.select("#data-flow-visualization").append("svg")
+                // Set up SVG 
+                const svg = d3.select("#graph-container").append("svg")
                     .attr("width", "100%")
-                    .attr("height", "100%")
-                    .attr("style", "background-color: white");
+                    .attr("height", "100%");
                 
-                const svgGroup = svg.append("g");
-                
-                // Add zoom behavior
-                const zoom = d3.zoom().on("zoom", (e) => {{
-                    svgGroup.attr("transform", e.transform);
-                }});
-                svg.call(zoom);
+                const inner = svg.append("g");
                 
                 // Run the renderer
-                render(svgGroup, g);
+                render(inner, g);
                 
                 // Center the graph
-                const initialScale = 0.75;
+                const svgWidth = parseInt(svg.style('width'));
+                const svgHeight = parseInt(svg.style('height'));
+                const graphWidth = g.graph().width;
+                const graphHeight = g.graph().height;
+                
+                // Create zoom behavior
+                const zoom = d3.zoom().on("zoom", function(event) {{
+                    inner.attr("transform", event.transform);
+                }});
+                
+                svg.call(zoom);
+                
+                // Initial zoom to fit the graph
+                const initialScale = Math.min(svgWidth / graphWidth, svgHeight / graphHeight) * 0.9;
+                const initialX = (svgWidth - graphWidth * initialScale) / 2;
+                const initialY = (svgHeight - graphHeight * initialScale) / 2;
+                
                 svg.call(zoom.transform, d3.zoomIdentity
-                    .translate((svg.attr("width") - g.graph().width * initialScale) / 2, 20)
+                    .translate(initialX, initialY)
                     .scale(initialScale));
                 
                 // Add tooltips
-                svgGroup.selectAll("g.node")
+                inner.selectAll("g.node")
                     .append("title")
                     .text(function(id) {{
                         const node = g.node(id);
                         return node.label;
                     }});
+                
+                // Add zoom controls
+                document.getElementById('zoom-in').addEventListener('click', function() {{
+                    svg.transition().call(zoom.scaleBy, 1.2);
+                }});
+                
+                document.getElementById('zoom-out').addEventListener('click', function() {{
+                    svg.transition().call(zoom.scaleBy, 1 / 1.2);
+                }});
+                
+                document.getElementById('reset').addEventListener('click', function() {{
+                    svg.transition().call(zoom.transform, d3.zoomIdentity
+                        .translate(initialX, initialY)
+                        .scale(initialScale));
+                }});
             }}
             
             function processCallChain(g, parentId, callChain, addedNodes, addedEdges) {{
