@@ -47,10 +47,20 @@ class ModelAnalyzer:
                         'site-packages' in str(module.__file__) or
                         'dist-packages' in str(module.__file__)))
         
-        if not hasattr(module, '__file__') or module.__file__ is None:
+        try:
+            if not hasattr(module, '__file__') or module.__file__ is None:
+                return False
+                
+            # Get normalized absolute paths
+            module_path = os.path.normpath(os.path.abspath(module.__file__))
+            project_path = os.path.normpath(os.path.abspath(self.project_root))
+            
+            # Simple path prefix check - more reliable for big projects
+            # This checks if the module's path starts with the project's path
+            return module_path.startswith(project_path)
+        except Exception:
+            # If we can't determine the module's file, treat it as external
             return False
-        
-        return os.path.commonpath([self.project_root]) == os.path.commonpath([self.project_root, module.__file__])
     
     def _analyze_models(self, model_references: Set[str]) -> List[Dict[str, Any]]:
         """Analyze models found in the project."""
